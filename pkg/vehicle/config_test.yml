@@ -1,0 +1,29 @@
+---
+aws:
+  type: t3.nano
+  mounts:
+  - size: 100G
+    path: /var/mount
+  subnet: subnet-xxxxxxxx
+    # tags:
+    # 	Name: <xxx>
+    # cidr_block: <xxx>
+  security_groups: 
+# - tags:
+#   Name: default
+  - sg-xxxxxxxx
+  iam_policy: |
+    \{
+    \}
+  ami: ami-xxxxxxxx
+  # filter:
+  ssh:
+    user: ubuntu
+
+working_directory: /app
+files:
+- ./aaa.txt
+# - source: ./roles
+#   destination: /tmp
+commands:
+- ansible-playbook
