@@ -1,218 +1,88 @@
 package vehicle
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/VJftw/vehicle/pkg/vehicle/provider/aws"
 )
 
-type MountConfig struct {
-	Size string `json:"size" yaml:"size"`
-	Path string `json:"path" yaml:"path"`
+// UUIDFunc is an overridable function to return a UUID
+var UUIDFunc = func() string {
+	return time.Now().Format(fmt.Sprintf("vehicle-20060102150405"))
 }
 
-func (m *MountConfig) UnmarshalYAMLConfig(configMap interface{}) error {
-	if y, ok := configMap.(map[interface{}]interface{}); ok {
-		switch x := y["size"].(type) {
-		case string:
-			m.Size = x
-			break
-		}
-		switch x := y["path"].(type) {
-		case string:
-			m.Path = x
-			break
-		}
-		return nil
-	}
-
-	return fmt.Errorf("unsupported map config")
-}
-
-type SubnetConfig struct {
-	ID        string            `json:"id" yaml:"-"`
-	Tags      map[string]string `json:"tags" yaml:"tags"`
-	CIDRBlock string            `json:"cidrBlock" yaml:"cidr_block"`
-}
-
-type SecurityGroupsConfig struct {
-	IDs  []string          `json:"ids" yaml:"-"`
-	Tags map[string]string `json:"tags" yaml:"tags"`
-}
-
-type AMIConfig struct {
-	ID     string `json:"id" yaml:"-"`
-	Filter string `json:"filter" yaml:"filter"`
-}
-
-type SSHConfig struct {
-	User    string        `json:"user" yaml:"user"`
-	Port    uint16        `json:"port" yaml:"port"`
-	Timeout time.Duration `json:"timeout" yaml:"timeout"`
-}
-
-func (s *SSHConfig) UnmarshalYAMLConfig(configMap interface{}) error {
-	if y, ok := configMap.(map[interface{}]interface{}); ok {
-		switch x := y["user"].(type) {
-		case string:
-			s.User = x
-			break
-		}
-		switch x := y["port"].(type) {
-		case int:
-			s.Port = uint16(x)
-			break
-		default:
-			s.Port = 22
-		}
-		switch x := y["timeout"].(type) {
-		case int:
-			s.Timeout = time.Duration(x) * time.Second
-			break
-		default:
-			s.Timeout = 300 * time.Second
-		}
-		return nil
-	}
-
-	return fmt.Errorf("unsupported map config")
-}
-
-type AWSConfig struct {
-	Type           string                 `json:"type" yaml:"type"`
-	Mounts         []MountConfig          `json:"mounts" yaml:"mounts"`
-	Subnet         SubnetConfig           `json:"subnet" yaml:"subnet"`
-	SecurityGroups []SecurityGroupsConfig `json:"securityGroups" yaml:"security_groups"`
-	IAMPolicy      string                 `json:"iamPolicy" yaml:"iam_policy"`
-	AMI            AMIConfig              `json:"ami" yaml:"ami"`
-	SSH            SSHConfig              `json:"ssh" yaml:"ssh"`
-}
-
-func (i *AWSConfig) UnmarshalYAMLConfig(configMap interface{}) error {
-	if m, ok := configMap.(map[interface{}]interface{}); ok {
-		switch x := m["type"].(type) {
-		case string:
-			i.Type = x
-			break
-		}
-
-		i.Subnet = SubnetConfig{}
-		switch x := m["subnet"].(type) {
-		case string:
-			i.Subnet.ID = x
-			break
-		case interface{}:
-			break
-		}
-
-		i.SecurityGroups = []SecurityGroupsConfig{}
-		switch x := m["security_groups"].(type) {
-		case []interface{}:
-			for _, sg := range x {
-				switch y := sg.(type) {
-				case string:
-					i.SecurityGroups = append(i.SecurityGroups, SecurityGroupsConfig{
-						IDs: []string{y},
-					})
-					break
-				}
-			}
-			break
-		}
-
-		i.Mounts = []MountConfig{}
-		switch x := m["mounts"].(type) {
-		case []interface{}:
-			for _, mount := range x {
-				switch y := mount.(type) {
-				case interface{}:
-					j := MountConfig{}
-					j.UnmarshalYAMLConfig(y)
-					i.Mounts = append(i.Mounts, j)
-					break
-				}
-			}
-			break
-		}
-
-		switch x := m["iam_policy"].(type) {
-		case string:
-			i.IAMPolicy = x
-			break
-		}
-
-		i.AMI = AMIConfig{}
-		switch x := m["ami"].(type) {
-		case string:
-			i.AMI.ID = x
-			break
-		case interface{}:
-			// i.AMI.UnmarshalYAML(x)
-			break
-		default:
-			fmt.Println("invalid type for ami")
-		}
-
-		switch x := m["ssh"].(type) {
-		case map[interface{}]interface{}:
-			i.SSH = SSHConfig{}
-			i.SSH.UnmarshalYAMLConfig(x)
-			break
-		default:
-			fmt.Println("invalid type for ssh")
-		}
-
-		return nil
-	}
-	return fmt.Errorf("incompatbile interface")
-}
-
+// Config represents a vehicle config
 type Config struct {
-	AWSConfig        AWSConfig `json:"aws" yaml:"aws"`
-	WorkingDirectory string    `json:"workingDirectory" yaml:"working_directory"`
-	Files            []string  `json:"files" yaml:"files"`
-	Commands         []string  `json:"commands" yaml:"commands"`
+	Clouds           map[string]Vehicle `json:"clouds"`
+	WorkingDirectory string             `json:"workingDirectory"`
+	Files            []string           `json:"files"`
+	Commands         []string           `json:"commands"`
 }
 
-func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	var configMap map[string]interface{}
-	err := unmarshal(&configMap)
+// NewConfig returns a new configuration
+func NewConfig() *Config {
+	return &Config{
+		Clouds:           map[string]Vehicle{},
+		WorkingDirectory: "",
+		Files:            []string{},
+		Commands:         []string{},
+	}
+}
+
+// UnmarshalJSON provides custom JSON unmarshalling
+func (c *Config) UnmarshalJSON(b []byte) error {
+	// We don't return any errors from this function so we can show more helpful parse errors
+	var objMap map[string]*json.RawMessage
+	// We'll store the error (if any) so we can return it if necessary
+	err := json.Unmarshal(b, &objMap)
 	if err != nil {
+		// c = handleBlueprintUnmarshalError(t, err)
 		return err
 	}
 
-	switch x := configMap["working_directory"].(type) {
-	case string:
-		c.WorkingDirectory = x
-		break
+	// Unmarshal Commands
+	if _, ok := objMap["commands"]; ok {
+		err = json.Unmarshal(*objMap["commands"], &c.Commands)
+		// c = handleBlueprintUnmarshalError(t, err)
 	}
 
-	c.Files = []string{}
-	switch x := configMap["files"].(type) {
-	case []interface{}:
-		for _, f := range x {
-			if val, ok := f.(string); ok {
-				c.Files = append(c.Files, val)
+	// Unmarshal clouds by provider
+	c.Clouds = map[string]Vehicle{}
+	if v, _ := objMap["clouds"]; v != nil {
+		var rawClouds map[string]*json.RawMessage
+		err = json.Unmarshal(*v, &rawClouds)
+		// c = handleUnmarshalError(c, err)
+		if err == nil {
+			for id, rawMessage := range rawClouds {
+				config, err := unmarshalCloud(id, *rawMessage)
+				// c = handleUnmarshalError(c, err)
+				if err == nil {
+					c.Clouds[id] = config
+				}
 			}
 		}
-		break
-	}
-
-	c.Commands = []string{}
-	switch x := configMap["commands"].(type) {
-	case []interface{}:
-		for _, command := range x {
-			if val, ok := command.(string); ok {
-				c.Commands = append(c.Commands, val)
-			}
-		}
-		break
-	}
-
-	switch x := configMap["aws"].(type) {
-	case interface{}:
-		c.AWSConfig = AWSConfig{}
-		c.AWSConfig.UnmarshalYAMLConfig(x)
 	}
 
 	return nil
+}
+
+func unmarshalCloud(id string, rawMessage []byte) (Vehicle, error) {
+	var m map[string]interface{}
+	err := json.Unmarshal(rawMessage, &m)
+	if err != nil {
+		return nil, err
+	}
+
+	var c Vehicle
+	switch m["provider"] {
+	case "aws":
+		c = aws.New(fmt.Sprintf("%s-%s", id, UUIDFunc()))
+	default:
+		return nil, fmt.Errorf("could not determine provider: %+v", m)
+	}
+
+	err = json.Unmarshal(rawMessage, c)
+	return c, err
 }

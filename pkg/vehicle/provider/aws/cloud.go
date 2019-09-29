@@ -1,20 +1,23 @@
-package vehicle
+package aws
 
 import (
 	"fmt"
 	"time"
 
+	"github.com/VJftw/vehicle/pkg/vehicle/provider"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"golang.org/x/crypto/ssh"
 )
 
+// AWS represents the AWS Cloud vehicle instance provider
 type AWS struct {
-	config    *AWSConfig
+	*provider.Base
+	*Config
+
 	ec2Client *ec2.EC2
 
-	uuid     string
 	instance *ec2.Instance
 
 	privateKey      []byte
@@ -22,8 +25,12 @@ type AWS struct {
 	instanceID      *string
 }
 
-func NewAWS(config *AWSConfig, uuid string) *AWS {
-	a := &AWS{config: config, uuid: uuid}
+// New returns a new AWS Cloud vehicle instance
+func New(uuid string) *AWS {
+	a := &AWS{
+		Base:   &provider.Base{Provider: "aws", UUID: uuid},
+		Config: NewConfig(),
+	}
 	sess := session.Must(session.NewSession(&aws.Config{
 		MaxRetries: aws.Int(3),
 	}))
@@ -31,6 +38,27 @@ func NewAWS(config *AWSConfig, uuid string) *AWS {
 	return a
 }
 
+// GetSSHInfo returns the ssh configuration for a provisioned AWS instance
+func (a *AWS) GetSSHInfo() (string, uint16, time.Duration, *ssh.ClientConfig) {
+	return aws.StringValue(a.instance.PublicIpAddress), a.SSH.Port, a.SSH.Timeout, a.sshClientConfig
+}
+
+// ResolveFuncs returns the functions involved in resolving dynamic resource IDs
+func (a *AWS) ResolveFuncs() []func() (error, []string) {
+	return []func() (error, []string){}
+}
+
+// StartFuncs returns the functions involved in starting an AWS instance
+func (a *AWS) StartFuncs() []func() error {
+	return []func() error{
+		a.createPrivateKey,
+		a.generateSSHConfig,
+		a.launchInstance,
+		a.waitForInstance,
+	}
+}
+
+// Stop stops and all AWS resources created by vehicle
 func (a *AWS) Stop() error {
 	if a.instanceID != nil {
 		fmt.Printf("terminating instance: %s\n", aws.StringValue(a.instanceID))
@@ -48,9 +76,9 @@ func (a *AWS) Stop() error {
 		}
 	}
 	if len(a.privateKey) > 0 {
-		fmt.Printf("deleting key pair: %s\n", a.uuid)
+		fmt.Printf("deleting key pair: %s\n", a.UUID)
 		_, err := a.ec2Client.DeleteKeyPair(&ec2.DeleteKeyPairInput{
-			KeyName: aws.String(a.uuid),
+			KeyName: aws.String(a.UUID),
 		})
 		if err != nil {
 			return err
@@ -60,9 +88,9 @@ func (a *AWS) Stop() error {
 }
 
 func (a *AWS) createPrivateKey() error {
-	fmt.Printf("creating key pair: %s\n", a.uuid)
+	fmt.Printf("creating key pair: %s\n", a.UUID)
 	keyPairOut, err := a.ec2Client.CreateKeyPair(&ec2.CreateKeyPairInput{
-		KeyName: aws.String(a.uuid),
+		KeyName: aws.String(a.UUID),
 	})
 	if err != nil {
 		return err
@@ -80,7 +108,7 @@ func (a *AWS) generateSSHConfig() error {
 	}
 
 	a.sshClientConfig = &ssh.ClientConfig{
-		User: a.config.SSH.User,
+		User: a.SSH.User,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
@@ -96,20 +124,20 @@ func (a *AWS) launchInstance() error {
 		// DryRun:       aws.Bool(true),
 		MinCount:     aws.Int64(1),
 		MaxCount:     aws.Int64(1),
-		ImageId:      aws.String(a.config.AMI.ID),
-		InstanceType: aws.String(a.config.Type),
-		KeyName:      aws.String(a.uuid),
+		ImageId:      aws.String(a.AMI.ID),
+		InstanceType: aws.String(a.Type),
+		KeyName:      aws.String(a.UUID),
 		SecurityGroupIds: []*string{
-			aws.String(a.config.SecurityGroups[0].IDs[0]),
+			aws.String(a.SecurityGroups[0].IDs[0]),
 		},
-		SubnetId: aws.String(a.config.Subnet.ID),
+		SubnetId: aws.String(a.Subnet.ID),
 		TagSpecifications: []*ec2.TagSpecification{
 			&ec2.TagSpecification{
 				ResourceType: aws.String("instance"),
 				Tags: []*ec2.Tag{
 					&ec2.Tag{
 						Key:   aws.String("Name"),
-						Value: aws.String(a.uuid),
+						Value: aws.String(a.UUID),
 					},
 				},
 			},
@@ -121,9 +149,11 @@ func (a *AWS) launchInstance() error {
 	})
 
 	if err != nil {
+		// log.Fatal(err)
 		return err
 	}
 
+	// log.Printf("%+v", reservations)
 	a.instanceID = reservations.Instances[0].InstanceId
 
 	return nil
@@ -131,10 +161,9 @@ func (a *AWS) launchInstance() error {
 
 func (a *AWS) waitForInstance() error {
 	fmt.Printf("waiting for instance to be OK: %s\n", aws.StringValue(a.instanceID))
-	err := a.ec2Client.WaitUntilInstanceStatusOk(&ec2.DescribeInstanceStatusInput{
+	if err := a.ec2Client.WaitUntilInstanceStatusOk(&ec2.DescribeInstanceStatusInput{
 		InstanceIds: []*string{a.instanceID},
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 	describeOut, err := a.ec2Client.DescribeInstances(&ec2.DescribeInstancesInput{
@@ -146,21 +175,4 @@ func (a *AWS) waitForInstance() error {
 	a.instance = describeOut.Reservations[0].Instances[0]
 
 	return nil
-}
-
-func (a *AWS) GetSSHInfo() (string, uint16, time.Duration, *ssh.ClientConfig) {
-	return aws.StringValue(a.instance.PublicIpAddress), a.config.SSH.Port, a.config.SSH.Timeout, a.sshClientConfig
-}
-
-func (a *AWS) ResolveFuncs() []func() (error, []string) {
-	return []func() (error, []string){}
-}
-
-func (a *AWS) StartFuncs() []func() error {
-	return []func() error{
-		a.createPrivateKey,
-		a.generateSSHConfig,
-		a.launchInstance,
-		a.waitForInstance,
-	}
 }

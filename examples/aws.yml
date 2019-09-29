@@ -1,0 +1,26 @@
+---
+clouds:
+  aws-example:
+    provider: aws
+    type: t3.nano
+    mounts:
+    - size: 100G
+      path: /var/mount
+    ami:
+      # filter: ""
+      id: "ami-06358f49b5839867c"
+    securityGroups: 
+      - ids: 
+        - "sg-xxxxxxx"
+    subnet:
+      # cidrBlock: ""
+      id: "subnet-xxxxxxxx"
+      # tags: null
+    # iamPolicy: ""
+    ssh:
+      user: "ubuntu"
+
+commands: 
+  - "ls -l"
+# files: null
+# workingDirectory: "/app"
