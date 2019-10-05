@@ -46,7 +46,7 @@ var driveCmd = &cobra.Command{
 
 		for _, c := range clouds {
 			wg.Add(1)
-			go c.Run(quit, &wg)
+			go c.Run(quit, &wg, config.WorkingDirectory, config.Commands)
 		}
 		<-quit
 		for _, c := range clouds {
@@ -77,7 +77,7 @@ func NewCloud(v vehicle.Vehicle) *cloud {
 	return &cloud{vehicle: v, run: true}
 }
 
-func (c *cloud) Run(stop chan os.Signal, wg *sync.WaitGroup) {
+func (c *cloud) Run(stop chan os.Signal, wg *sync.WaitGroup, workingDir string, commands []string) {
 	defer wg.Done()
 	defer func() { c.run = false }()
 	defer c.cleanUp(stop)
@@ -103,7 +103,14 @@ func (c *cloud) Run(stop chan os.Signal, wg *sync.WaitGroup) {
 		address, port, timeout, sshConfig := c.vehicle.GetSSHInfo()
 		vehicle.WaitForSSH(address, port, timeout)
 		// Run commands
-		ssh.ConnectToSSH(address, port, timeout, sshConfig)
+		client := ssh.ConnectToSSH(address, port, timeout, sshConfig)
+		defer client.Close()
+		ssh.RunCmd(client, "whoami")
+		for _, cmd := range commands {
+			if c.run {
+				ssh.RunCmd(client, cmd)
+			}
+		}
 	}
 
 }

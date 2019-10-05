@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/VJftw/vehicle/pkg/vehicle/provider/aws"
+	"github.com/VJftw/vehicle/pkg/vehicle/provider/docker"
 )
 
 // UUIDFunc is an overridable function to return a UUID
@@ -79,6 +80,8 @@ func unmarshalCloud(id string, rawMessage []byte) (Vehicle, error) {
 	switch m["provider"] {
 	case "aws":
 		c = aws.New(fmt.Sprintf("%s-%s", id, UUIDFunc()))
+	case "docker":
+		c = docker.New(fmt.Sprintf("%s-%s", id, UUIDFunc()))
 	default:
 		return nil, fmt.Errorf("could not determine provider: %+v", m)
 	}

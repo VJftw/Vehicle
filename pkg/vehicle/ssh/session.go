@@ -10,14 +10,24 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func ConnectToSSH(address string, port uint16, timeout time.Duration, sshConfig *ssh.ClientConfig) {
+func ConnectToSSH(address string, port uint16, timeout time.Duration, sshConfig *ssh.ClientConfig) *ssh.Client {
 	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", address, port), sshConfig)
 	if err != nil {
 		log.Fatalf("unable to connect: %v", err)
 	}
 
-	defer client.Close()
+	// defer client.Close()
 
+	// err = exec(client, "whoami")
+	// err = exec(client, "ls -la")
+	// err = exec(client, "env | sort")
+
+	return client
+
+	// create new session for each command
+}
+
+func RunCmd(client *ssh.Client, cmd string) error {
 	// Create a session
 	session, err := client.NewSession()
 	if err != nil {
@@ -46,8 +56,5 @@ func ConnectToSSH(address string, port uint16, timeout time.Duration, sshConfig 
 		panic(fmt.Errorf("Unable to setup stderr for session: %v", err))
 	}
 	go io.Copy(os.Stderr, stderr)
-
-	err = session.Run("whoami")
-
-	// create new session for each command
+	return session.Run(cmd)
 }

@@ -1,0 +1,8 @@
+---
+clouds:
+  docker-example:
+    provider: docker
+commands: 
+  - "ls -l"
+# files: null
+# workingDirectory: "/app"
